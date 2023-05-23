@@ -22,29 +22,19 @@ index 9c1217351e..3c24755558 100644
  
  /**
 diff --git a/harness/regExpUtils.js b/harness/regExpUtils.js
-index be7039fda0..7b38abf8df 100644
+index 677a8cf942..c6166c6265 100644
 --- a/harness/regExpUtils.js
 +++ b/harness/regExpUtils.js
-@@ -6,24 +6,27 @@ description: |
- defines: [buildString, testPropertyEscapes, matchValidator]
+@@ -6,29 +6,27 @@ description: |
+ defines: [buildString, testPropertyEscapes, testPropertyOfStrings, testExtendedCharacterClass, matchValidator]
  ---*/
  
-+if ($262 && typeof $262.codePointRange === "function") {
-+    /* use C function to build the codePointRange (much faster with
-+       slow JS engines) */
-+    codePointRange = $262.codePointRange;
-+} else {
-+    codePointRange = function codePointRange(start, end) {
-+        const codePoints = [];
-+        let length = 0;
-+        for (codePoint = start; codePoint < end; codePoint++) {
-+            codePoints[length++] = codePoint;
-+        }
-+        return String.fromCodePoint.apply(null, codePoints);
-+    }
-+}
-+
- function buildString({ loneCodePoints, ranges }) {
+-function buildString(args) {
+-  // Use member expressions rather than destructuring `args` for improved
+-  // compatibility with engines that only implement assignment patterns
+-  // partially or not at all.
+-  const loneCodePoints = args.loneCodePoints;
+-  const ranges = args.ranges;
 -  const CHUNK_SIZE = 10000;
 -  let result = Reflect.apply(String.fromCodePoint, null, loneCodePoints);
 -  for (let i = 0; i < ranges.length; i++) {
@@ -58,14 +48,30 @@ index be7039fda0..7b38abf8df 100644
 -        result += Reflect.apply(String.fromCodePoint, null, codePoints);
 -        codePoints.length = length = 0;
 -      }
-+    let result = String.fromCodePoint.apply(null, loneCodePoints);
-+    for (const [start, end] of ranges) {
-+        result += codePointRange(start, end + 1);
++if ($262 && typeof $262.codePointRange === "function") {
++    /* use C function to build the codePointRange (much faster with
++       slow JS engines) */
++    codePointRange = $262.codePointRange;
++} else {
++    codePointRange = function codePointRange(start, end) {
++        const codePoints = [];
++        let length = 0;
++        for (codePoint = start; codePoint < end; codePoint++) {
++            codePoints[length++] = codePoint;
++        }
++        return String.fromCodePoint.apply(null, codePoints);
      }
 -    result += Reflect.apply(String.fromCodePoint, null, codePoints);
 -  }
 -  return result;
-+    return result;
++}
++
++function buildString({ loneCodePoints, ranges }) {
++   let result = String.fromCodePoint.apply(null, loneCodePoints);
++   for (const [start, end] of ranges) {
++       result += codePointRange(start, end + 1);
++   }
++   return result;
  }
  
- function testPropertyEscapes(regex, string, expression) {
+ function printCodePoint(codePoint) {
