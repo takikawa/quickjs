@@ -7357,7 +7357,9 @@ static int JS_AddBrand(JSContext *ctx, JSValueConst obj, JSValueConst home_obj)
     return 0;
 }
 
-static int JS_CheckBrand(JSContext *ctx, JSValueConst obj, JSValueConst func)
+/* return -1 if exception or TRUE/FALSE */
+static int JS_CheckBrand(JSContext *ctx, JSValueConst obj, JSValueConst func,
+                         BOOL should_throw_for_brand)
 {
     JSObject *p, *p1, *home_obj;
     JSShapeProperty *prs;
@@ -7378,8 +7380,11 @@ static int JS_CheckBrand(JSContext *ctx, JSValueConst obj, JSValueConst func)
         goto not_obj;
     prs = find_own_property(&pr, home_obj, JS_ATOM_Private_brand);
     if (!prs) {
-        JS_ThrowTypeError(ctx, "expecting <brand> private field");
-        return -1;
+        if (should_throw_for_brand) {
+            JS_ThrowTypeError(ctx, "expecting <brand> private field");
+            return -1;
+        }
+        return FALSE;
     }
     brand = pr->u.value;
     /* safety check */
@@ -7392,10 +7397,13 @@ static int JS_CheckBrand(JSContext *ctx, JSValueConst obj, JSValueConst func)
     p = JS_VALUE_GET_OBJ(obj);
     prs = find_own_property(&pr, p, js_symbol_to_atom(ctx, (JSValue)brand));
     if (!prs) {
-        JS_ThrowTypeError(ctx, "invalid brand on object");
-        return -1;
+        if (should_throw_for_brand) {
+            JS_ThrowTypeError(ctx, "invalid brand on object");
+            return -1;
+        }
+        return FALSE;
     }
-    return 0;
+    return TRUE;
 }
 
 static uint32_t js_string_obj_get_length(JSContext *ctx,
@@ -14757,11 +14765,16 @@ static __exception int js_operator_in(JSContext *ctx, JSValue *sp)
         JS_ThrowTypeError(ctx, "invalid 'in' operand");
         return -1;
     }
-    atom = JS_ValueToAtom(ctx, op1);
-    if (unlikely(atom == JS_ATOM_NULL))
-        return -1;
-    ret = JS_HasProperty(ctx, op2, atom);
-    JS_FreeAtom(ctx, atom);
+    if (JS_VALUE_GET_TAG(op1) != JS_TAG_OBJECT) {
+        atom = JS_ValueToAtom(ctx, op1);
+        if (unlikely(atom == JS_ATOM_NULL))
+            return -1;
+        ret = JS_HasProperty(ctx, op2, atom);
+        JS_FreeAtom(ctx, atom);
+    } else {
+        /* This case can occur if the LHS is a private method name */
+        ret = JS_CheckBrand(ctx, op2, op1, FALSE);
+    }
     if (ret < 0)
         return -1;
     JS_FreeValue(ctx, op1);
@@ -16754,7 +16767,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             }
             BREAK;
         CASE(OP_check_brand):
-            if (JS_CheckBrand(ctx, sp[-2], sp[-1]) < 0)
+            if (JS_CheckBrand(ctx, sp[-2], sp[-1], TRUE) < 0)
                 goto exception;
             BREAK;
         CASE(OP_add_brand):
@@ -24472,6 +24485,19 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
             return -1;
         emit_op(s, OP_push_true);
         break;
+    case TOK_PRIVATE_NAME:
+        {
+            JSAtom name;
+            if (peek_token(s, FALSE) != TOK_IN)
+                return -1;
+            name = JS_DupAtom(s->ctx, s->token.u.ident.atom);
+            if (next_token(s))
+                return -1;
+            emit_op(s, OP_scope_ref_private_field);
+            emit_u32(s, name);
+            emit_u16(s, s->cur_func->scope_level);
+            break;
+        }
     case TOK_IDENT:
         {
             JSAtom name;
@@ -30106,6 +30132,10 @@ static int resolve_scope_private_field(JSContext *ctx, JSFunctionDef *s,
         return -1;
     assert(var_kind != JS_VAR_NORMAL);
     switch (op) {
+    /* this case is used for `in` operator LHS references */
+    case OP_scope_ref_private_field:
+        get_loc_or_ref(bc, is_ref, idx);
+        break;
     case OP_scope_get_private_field:
     case OP_scope_get_private_field2:
         switch(var_kind) {
@@ -30884,6 +30914,7 @@ static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
                 JS_FreeAtom(ctx, var_name);
             }
             break;
+        case OP_scope_ref_private_field:
         case OP_scope_get_private_field:
         case OP_scope_get_private_field2:
         case OP_scope_put_private_field:
