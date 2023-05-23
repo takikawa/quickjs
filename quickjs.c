@@ -20004,7 +20004,7 @@ typedef struct JSFunctionDef {
     int home_object_var_idx;
     BOOL need_home_object;
     
-    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_level;    /* index into fd->scopes of the current lexical scope */
     int scope_first;    /* index into vd->vars of first lexically scoped variable */
     int scope_size;     /* allocated size of fd->scopes array */
     int scope_count;    /* number of entries used in the fd->scopes array */
