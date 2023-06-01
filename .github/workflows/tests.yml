@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+
+  pull_request:
+    branches: [ master ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          submodules: "recursive"
+      - name: Build QuickJS
+        run: make
+      - name: Run normal tests
+        # test_os() depends on stdin being a tty, which requires this hack
+        # https://github.com/gfx/example-github-actions-with-tty
+        shell: 'script -q -e -c "bash {0}"'
+        run: make test
+
+  run-test262:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          submodules: "recursive"
+      - name: Build QuickJS
+        run: make
+      - name: Patch test262
+        run: cd test262 && patch -p1 < ../tests/test262.patch
+      - name: Run test262 tests
+        run: make test2
